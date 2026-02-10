@@ -1,7 +1,8 @@
-import { Question, Submission, FileSubmission, SupportConfig } from '../types';
+import { Question, Submission, FileSubmission, SupportConfig, CloudState } from '../types';
 
-// Use 127.0.0.1 instead of localhost for more consistent cross-browser performance
-const API_BASE = 'http://127.0.0.1:8000/api';
+const LOCAL_API = 'http://127.0.0.1:8000/api';
+// Using a public JSON storage service for "Global Mode"
+const GLOBAL_STORE_URL = 'https://jsonblob.com/api/jsonBlob';
 
 export const DatabaseService = {
   _cache: {
@@ -10,39 +11,85 @@ export const DatabaseService = {
     files: [] as FileSubmission[],
     config: { meetLink: 'https://meet.google.com/new' } as SupportConfig
   },
+  _mode: 'local' as 'local' | 'cloud',
+  _blobId: null as string | null,
 
-  async sync(): Promise<boolean> {
+  /**
+   * Syncs data from either the local server or the public cloud storage
+   */
+  async sync(classroomId: string = 'DEMO-ROOM'): Promise<boolean> {
     try {
-      const controller = new AbortController();
-      // Shorter timeout for faster UI feedback when server is down
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      // 1. Try Local Server First (for development)
+      const localResp = await fetch(`${LOCAL_API}/state`, { 
+        signal: AbortSignal.timeout(1000) 
+      }).catch(() => null);
 
-      const response = await fetch(`${API_BASE}/state`, { 
-        signal: controller.signal,
-        headers: {
-          'Accept': 'application/json',
-          'Cache-Control': 'no-cache'
+      if (localResp && localResp.ok) {
+        const data = await localResp.json();
+        this._cache.questions = data.questions || [];
+        this._cache.submissions = data.submissions || [];
+        this._cache.files = data.files || [];
+        this._mode = 'local';
+        return true;
+      }
+
+      // 2. Fallback to Global Cloud Mode using Classroom ID as a key
+      this._mode = 'cloud';
+      const storedBlobId = localStorage.getItem(`aptimaster_blob_${classroomId}`);
+      
+      if (storedBlobId) {
+        const cloudResp = await fetch(`${GLOBAL_STORE_URL}/${storedBlobId}`);
+        if (cloudResp.ok) {
+          const data: CloudState = await cloudResp.json();
+          this._cache.questions = data.questions || [];
+          this._cache.submissions = data.submissions || [];
+          this._cache.files = data.files || [];
+          this._blobId = storedBlobId;
+          return true;
         }
-      });
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        console.warn(`Sync Warning: Backend returned ${response.status}`);
-        return false;
       }
       
-      const data = await response.json();
-      this._cache.questions = data.questions || [];
-      this._cache.submissions = data.submissions || [];
-      this._cache.files = data.files || [];
-      return true;
-    } catch (e: any) {
-      if (e.name === 'AbortError') {
-        console.debug("Backend sync timed out - Check if 'npm run server' is active.");
-      } else {
-        console.debug(`Backend at ${API_BASE} unreachable. Start it with 'npm run server'.`);
-      }
+      // If no cloud data exists yet, initialize it
       return false;
+    } catch (e) {
+      console.error("Sync Critical Error:", e);
+      return false;
+    }
+  },
+
+  getMode() { return this._mode; },
+
+  async _updateCloud(classroomId: string) {
+    const payload = {
+      questions: this._cache.questions,
+      submissions: this._cache.submissions,
+      files: this._cache.files,
+      lastUpdated: new Date().toISOString()
+    };
+
+    if (this._blobId) {
+      await fetch(`${GLOBAL_STORE_URL}/${this._blobId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } else {
+      const resp = await fetch(GLOBAL_STORE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const location = resp.headers.get('Location');
+      if (location) {
+        const id = location.split('/').pop();
+        if (id) {
+          this._blobId = id;
+          localStorage.setItem(`aptimaster_blob_${classroomId}`, id);
+          // In a real app, you'd store this ID in a registry service.
+          // For this version, we use the classroomId to derive a consistent hash if possible,
+          // but for now, we rely on the user having the Blob ID in localstorage or hardcoded.
+        }
+      }
     }
   },
 
@@ -50,62 +97,64 @@ export const DatabaseService = {
     return this._cache.questions;
   },
 
-  async addQuestion(q: Question) {
-    try {
-      await fetch(`${API_BASE}/questions`, {
+  async addQuestion(q: Question, classroomId: string) {
+    if (this._mode === 'local') {
+      await fetch(`${LOCAL_API}/questions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(q)
       });
-      await this.sync();
-    } catch (e) {
-      console.error("Failed to post question. Is the server running?", e);
+    } else {
+      this._cache.questions.push(q);
+      await this._updateCloud(classroomId);
     }
+    await this.sync(classroomId);
   },
 
-  async deleteQuestion(id: string) {
-    try {
-      await fetch(`${API_BASE}/questions/${id}`, {
-        method: 'DELETE'
-      });
-      await this.sync();
-    } catch (e) {
-      console.error("Failed to delete question.", e);
+  async deleteQuestion(id: string, classroomId: string) {
+    if (this._mode === 'local') {
+      await fetch(`${LOCAL_API}/questions/${id}`, { method: 'DELETE' });
+    } else {
+      this._cache.questions = this._cache.questions.filter(q => q.id !== id);
+      await this._updateCloud(classroomId);
     }
+    await this.sync(classroomId);
   },
 
   getSubmissions(): Submission[] {
     return this._cache.submissions;
   },
 
-  async addSubmission(sub: Submission) {
-    try {
-      await fetch(`${API_BASE}/submissions`, {
+  async addSubmission(sub: Submission, classroomId: string) {
+    if (this._mode === 'local') {
+      await fetch(`${LOCAL_API}/submissions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sub)
       });
-      await this.sync();
-    } catch (e) {
-      console.error("Failed to add submission.", e);
+    } else {
+      this._cache.submissions.unshift(sub);
+      await this._updateCloud(classroomId);
     }
+    await this.sync(classroomId);
   },
 
   getFiles(): FileSubmission[] {
     return this._cache.files;
   },
 
-  async addFile(file: FileSubmission) {
-    try {
-      await fetch(`${API_BASE}/files`, {
+  async addFile(file: FileSubmission, classroomId: string) {
+    if (this._mode === 'local') {
+      await fetch(`${LOCAL_API}/files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(file)
       });
-      await this.sync();
-    } catch (e) {
-      console.error("File sync error", e);
+    } else {
+      this._cache.files.unshift(file);
+      await this._updateCloud(classroomId);
     }
+    await this.sync(classroomId);
   },
 
   getConfig(): SupportConfig {

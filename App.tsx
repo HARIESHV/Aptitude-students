@@ -14,18 +14,20 @@ const App: React.FC = () => {
   const [allFileSubmissions, setAllFileSubmissions] = useState<FileSubmission[]>([]);
   const [supportConfig, setSupportConfig] = useState<SupportConfig>(DatabaseService.getConfig());
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
+  const [connMode, setConnMode] = useState<'local' | 'cloud'>('local');
 
   const refreshGlobalData = useCallback(() => {
     setQuestions(DatabaseService.getQuestions());
     setAllSubmissions(DatabaseService.getSubmissions());
     setAllFileSubmissions(DatabaseService.getFiles());
     setSupportConfig(DatabaseService.getConfig());
+    setConnMode(DatabaseService.getMode());
   }, []);
 
   useEffect(() => {
     const pollBackend = async () => {
       setSyncStatus('syncing');
-      const success = await DatabaseService.sync();
+      const success = await DatabaseService.sync(currentUser?.classroomId);
       if (success) {
         refreshGlobalData();
         setSyncStatus('synced');
@@ -35,9 +37,9 @@ const App: React.FC = () => {
     };
 
     pollBackend();
-    const interval = setInterval(pollBackend, 5000);
+    const interval = setInterval(pollBackend, currentUser ? 5000 : 30000);
     return () => clearInterval(interval);
-  }, [refreshGlobalData]);
+  }, [refreshGlobalData, currentUser]);
 
   const handleLogin = (user: User) => {
     setCurrentUser(user);
@@ -49,22 +51,26 @@ const App: React.FC = () => {
   };
 
   const addQuestion = async (q: Question) => {
-    await DatabaseService.addQuestion(q);
+    if (!currentUser) return;
+    await DatabaseService.addQuestion(q, currentUser.classroomId);
     refreshGlobalData();
   };
 
   const deleteQuestion = async (id: string) => {
-    await DatabaseService.deleteQuestion(id);
+    if (!currentUser) return;
+    await DatabaseService.deleteQuestion(id, currentUser.classroomId);
     refreshGlobalData();
   };
 
   const handleAddSubmission = async (sub: Submission) => {
-    await DatabaseService.addSubmission(sub);
+    if (!currentUser) return;
+    await DatabaseService.addSubmission(sub, currentUser.classroomId);
     refreshGlobalData();
   };
 
   const handleAddFileSubmission = async (file: FileSubmission) => {
-    await DatabaseService.addFile(file);
+    if (!currentUser) return;
+    await DatabaseService.addFile(file, currentUser.classroomId);
     refreshGlobalData();
   };
 
@@ -95,7 +101,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Navbar user={currentUser} onLogout={handleLogout} syncStatus={syncStatus} />
+      <Navbar user={currentUser} onLogout={handleLogout} syncStatus={syncStatus} connMode={connMode} />
       <main className="flex-grow container mx-auto px-4 py-8">
         {currentUser.role === UserRole.ADMIN ? (
           <AdminDashboard 
@@ -128,7 +134,7 @@ const App: React.FC = () => {
         )}
       </main>
       <footer className="bg-white border-t py-6 text-center text-slate-500 text-sm">
-        &copy; 2024 AptiMaster Platform. Cloud: {syncStatus === 'synced' ? 'Online' : 'Offline'}
+        &copy; 2024 AptiMaster Platform. Sync Mode: <span className="font-bold text-indigo-600 uppercase">{connMode}</span>
       </footer>
     </div>
   );

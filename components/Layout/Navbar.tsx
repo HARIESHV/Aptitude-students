@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { User } from '../../types';
 
@@ -6,9 +5,10 @@ interface NavbarProps {
   user: User;
   onLogout: () => void;
   syncStatus?: 'synced' | 'syncing' | 'error';
+  connMode?: 'local' | 'cloud';
 }
 
-const Navbar: React.FC<NavbarProps> = ({ user, onLogout, syncStatus = 'synced' }) => {
+const Navbar: React.FC<NavbarProps> = ({ user, onLogout, syncStatus = 'synced', connMode = 'local' }) => {
   const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost';
 
   return (
@@ -25,7 +25,7 @@ const Navbar: React.FC<NavbarProps> = ({ user, onLogout, syncStatus = 'synced' }
                 className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border cursor-help group relative ${isSecure ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-amber-50 border-amber-100 text-amber-600'}`}
               >
                 <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${isSecure ? 'bg-emerald-500' : 'bg-amber-500'}`}></div>
-                <span className="text-[9px] font-black uppercase tracking-widest">{isSecure ? 'SSL Secure' : 'Insecure'}</span>
+                <span className="text-[9px] font-black uppercase tracking-widest">{connMode === 'cloud' ? 'Global Cloud' : 'Local Dev'}</span>
               </div>
             </div>
             <div className="flex items-center gap-2 mt-0.5">

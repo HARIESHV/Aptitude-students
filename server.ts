@@ -9,8 +9,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 8000;
-// Use any cast to satisfy compiler that doesn't recognize cwd() on Process type
-const DB_FILE = path.join((process as any).cwd(), 'database.json');
+const DB_FILE = path.join(process.cwd(), 'database.json');
 
 app.use(cors({
   origin: '*',
@@ -118,8 +117,7 @@ server.on('error', (e: any) => {
     Then run: npm run server
     ---------------------------------------------
     `);
-    // Use any cast to satisfy compiler that doesn't recognize exit() on Process type
-    (process as any).exit(1);
+    process.exit(1);
   } else {
     console.error('Unexpected server error:', e);
   }
