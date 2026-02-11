@@ -3,12 +3,15 @@ import cors from 'cors';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+// Import process explicitly to resolve type conflicts where process might be typed incorrectly
+import process from 'node:process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 8000;
+// Using process.cwd() from the explicitly imported process object
 const DB_FILE = path.join(process.cwd(), 'database.json');
 
 app.use(cors({
@@ -117,6 +120,7 @@ server.on('error', (e: any) => {
     Then run: npm run server
     ---------------------------------------------
     `);
+    // Calling exit(1) on the typed process object
     process.exit(1);
   } else {
     console.error('Unexpected server error:', e);

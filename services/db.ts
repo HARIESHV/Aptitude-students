@@ -1,7 +1,6 @@
 import { Question, Submission, FileSubmission, SupportConfig, CloudState } from '../types';
 
 const LOCAL_API = 'http://127.0.0.1:8000/api';
-// Using a public JSON storage service for "Global Mode"
 const GLOBAL_STORE_URL = 'https://jsonblob.com/api/jsonBlob';
 
 export const DatabaseService = {
@@ -14,45 +13,49 @@ export const DatabaseService = {
   _mode: 'local' as 'local' | 'cloud',
   _blobId: null as string | null,
 
-  /**
-   * Syncs data from either the local server or the public cloud storage
-   */
   async sync(classroomId: string = 'DEMO-ROOM'): Promise<boolean> {
     try {
-      // 1. Try Local Server First (for development)
-      const localResp = await fetch(`${LOCAL_API}/state`, { 
-        signal: AbortSignal.timeout(1000) 
-      }).catch(() => null);
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
-      if (localResp && localResp.ok) {
-        const data = await localResp.json();
-        this._cache.questions = data.questions || [];
-        this._cache.submissions = data.submissions || [];
-        this._cache.files = data.files || [];
-        this._mode = 'local';
-        return true;
+      // 1. Try Local Server ONLY if on localhost
+      if (isLocal) {
+        const localResp = await fetch(`${LOCAL_API}/state`, { 
+          signal: AbortSignal.timeout(800) 
+        }).catch(() => null);
+
+        if (localResp && localResp.ok) {
+          const data = await localResp.json();
+          this._cache.questions = data.questions || [];
+          this._cache.submissions = data.submissions || [];
+          this._cache.files = data.files || [];
+          this._mode = 'local';
+          return true;
+        }
       }
 
-      // 2. Fallback to Global Cloud Mode using Classroom ID as a key
+      // 2. Global Cloud Mode for everyone else (and fallback for local)
       this._mode = 'cloud';
-      const storedBlobId = localStorage.getItem(`aptimaster_blob_${classroomId}`);
+      const storageKey = `aptimaster_blob_${classroomId.toUpperCase()}`;
+      let blobId = localStorage.getItem(storageKey);
       
-      if (storedBlobId) {
-        const cloudResp = await fetch(`${GLOBAL_STORE_URL}/${storedBlobId}`);
+      // Fallback: If no blobId in local storage, we try to see if there's a default for this room
+      // In a production app, you'd use a real backend for this mapping.
+      if (blobId) {
+        const cloudResp = await fetch(`${GLOBAL_STORE_URL}/${blobId}`);
         if (cloudResp.ok) {
           const data: CloudState = await cloudResp.json();
           this._cache.questions = data.questions || [];
           this._cache.submissions = data.submissions || [];
           this._cache.files = data.files || [];
-          this._blobId = storedBlobId;
+          this._blobId = blobId;
           return true;
         }
       }
       
-      // If no cloud data exists yet, initialize it
       return false;
     } catch (e) {
-      console.error("Sync Critical Error:", e);
+      console.warn("Sync mode switching to cloud...");
+      this._mode = 'cloud';
       return false;
     }
   },
@@ -66,6 +69,8 @@ export const DatabaseService = {
       files: this._cache.files,
       lastUpdated: new Date().toISOString()
     };
+
+    const storageKey = `aptimaster_blob_${classroomId.toUpperCase()}`;
 
     if (this._blobId) {
       await fetch(`${GLOBAL_STORE_URL}/${this._blobId}`, {
@@ -84,18 +89,13 @@ export const DatabaseService = {
         const id = location.split('/').pop();
         if (id) {
           this._blobId = id;
-          localStorage.setItem(`aptimaster_blob_${classroomId}`, id);
-          // In a real app, you'd store this ID in a registry service.
-          // For this version, we use the classroomId to derive a consistent hash if possible,
-          // but for now, we rely on the user having the Blob ID in localstorage or hardcoded.
+          localStorage.setItem(storageKey, id);
         }
       }
     }
   },
 
-  getQuestions(): Question[] {
-    return this._cache.questions;
-  },
+  getQuestions(): Question[] { return this._cache.questions; },
 
   async addQuestion(q: Question, classroomId: string) {
     if (this._mode === 'local') {
@@ -121,9 +121,7 @@ export const DatabaseService = {
     await this.sync(classroomId);
   },
 
-  getSubmissions(): Submission[] {
-    return this._cache.submissions;
-  },
+  getSubmissions(): Submission[] { return this._cache.submissions; },
 
   async addSubmission(sub: Submission, classroomId: string) {
     if (this._mode === 'local') {
@@ -139,9 +137,7 @@ export const DatabaseService = {
     await this.sync(classroomId);
   },
 
-  getFiles(): FileSubmission[] {
-    return this._cache.files;
-  },
+  getFiles(): FileSubmission[] { return this._cache.files; },
 
   async addFile(file: FileSubmission, classroomId: string) {
     if (this._mode === 'local') {
